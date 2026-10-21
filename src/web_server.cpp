@@ -1,6 +1,7 @@
 #include <ESPAsyncWebServer.h>
 #include <Update.h>
 #include "relay_manager.h"
+#include "ac_monitor.h"
 
 AsyncWebServer server(80);
 
@@ -218,6 +219,9 @@ String htmlPage()
 
             margin-top: 8px;
         }
+
+        .electricity-on { color: #00e676; }
+        .electricity-off { color: #ff5252; }
 
         .relay-grid
         {
@@ -462,13 +466,13 @@ String htmlPage()
 
             <div class="status-title">
 
-                DEVICE STATUS
+                ELECTRICITY SUPPLY
 
             </div>
 
-            <div class="status-value">
+            <div class="status-value" id="electricity-status">
 
-                ONLINE
+                CHECKING...
 
             </div>
 
@@ -598,6 +602,19 @@ function fetchStates()
     });
 }
 
+function fetchElectricityStatus()
+{
+    fetch('/api/electricity_status')
+    .then(r => r.json())
+    .then(data =>
+    {
+        const status = document.getElementById('electricity-status');
+        status.textContent = data.electricity_on ? 'POWER ON' : 'POWER CUT OFF';
+        status.className = 'status-value ' +
+            (data.electricity_on ? 'electricity-on' : 'electricity-off');
+    });
+}
+
 
 
 function toggleRelay(relay, state)
@@ -613,8 +630,13 @@ function toggleRelay(relay, state)
 
 
 setInterval(fetchStates, 1000);
+setInterval(fetchElectricityStatus, 1000);
 
-window.onload = fetchStates;
+window.onload = function()
+{
+    fetchStates();
+    fetchElectricityStatus();
+};
 
 </script>
 
@@ -640,6 +662,12 @@ void webServerInit()
             if (i < 3) json += ",";
         }
         json += "]";
+        request->send(200, "application/json", json);
+    });
+
+    server.on("/api/electricity_status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String json = String("{\"electricity_on\":") +
+            (isElectricityOn() ? "true" : "false") + "}";
         request->send(200, "application/json", json);
     });
 

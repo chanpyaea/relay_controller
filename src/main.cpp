@@ -4,12 +4,15 @@
 #include "mqtt_manager.h"
 #include "relay_manager.h"
 #include "web_server.h"
+#include "ac_monitor.h"
 
 void setup()
 {
     Serial.begin(115200);
 
     relayInit();
+
+    acMonitorInit();
 
     wifiInit();
 
@@ -25,4 +28,6 @@ void loop()
     wifiLoop();
 
     mqttLoop();
+
+    acMonitorLoop();
 }

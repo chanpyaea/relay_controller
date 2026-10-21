@@ -11,4 +11,6 @@ void mqttPublishState(uint8_t relay, bool state);
 
 void mqttPublishDiscovery();
 
+void mqttPublishElectricityState(bool state);
+
 #endif
