@@ -5,6 +5,7 @@
 #include "relay_manager.h"
 #include "web_server.h"
 #include "ac_monitor.h"
+#include "water_level.h"
 
 void setup()
 {
@@ -13,6 +14,8 @@ void setup()
     relayInit();
 
     acMonitorInit();
+
+    waterLevelInit();
 
     wifiInit();
 
@@ -30,4 +33,6 @@ void loop()
     mqttLoop();
 
     acMonitorLoop();
+
+    waterLevelLoop();
 }

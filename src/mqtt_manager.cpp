@@ -5,6 +5,7 @@
 #include "config.h"
 #include "relay_manager.h"
 #include "ac_monitor.h"
+#include "water_level.h"
 
 WiFiClient espClient;
 
@@ -16,6 +17,7 @@ unsigned long mqttReconnectTimer = 0;
 void mqttPublishState(uint8_t relay, bool state);
 void mqttPublishDiscovery();
 void mqttPublishElectricityState(bool state);
+void mqttPublishWaterLevel(const char* state, uint8_t percentage);
 
 void mqttCallback(char* topic, byte* payload, unsigned int length)
 {
@@ -73,6 +75,7 @@ void mqttReconnect()
         }
 
         mqttPublishElectricityState(isElectricityOn());
+        mqttPublishWaterLevel(getWaterLevelState(), getWaterLevelPercentage());
     }
 }
 
@@ -119,6 +122,19 @@ void mqttPublishElectricityState(bool state)
     const char* payload = state ? "ON" : "OFF";
     mqttClient.publish(AC_STATE_TOPIC, payload, true);
     Serial.printf("Published electricity state: %s = %s\n", AC_STATE_TOPIC, payload);
+}
+
+void mqttPublishWaterLevel(const char* state, uint8_t percentage)
+{
+    if(!mqttClient.connected())
+    {
+        return;
+    }
+
+    const String percentagePayload = String(percentage);
+    mqttClient.publish(WATER_LEVEL_STATE_TOPIC, state, true);
+    mqttClient.publish(WATER_LEVEL_PERCENT_TOPIC, percentagePayload.c_str(), true);
+    Serial.printf("Published water level: %s (%u%%)\n", state, percentage);
 }
 
 void mqttPublishDiscovery()
@@ -190,6 +206,41 @@ void mqttPublishDiscovery()
                   acPublished ? "Published" : "FAILED to publish",
                   acDiscoveryTopic.c_str(),
                   static_cast<unsigned int>(acPayload.length()));
+
+    JsonDocument waterStateDoc;
+    waterStateDoc["name"] = "Water Level";
+    waterStateDoc["unique_id"] = String(HA_DEVICE_ID) + "_water_level";
+    waterStateDoc["stat_t"] = WATER_LEVEL_STATE_TOPIC;
+    waterStateDoc["avty_t"] = HA_AVAILABILITY_TOPIC;
+    waterStateDoc["icon"] = "mdi:water-percent";
+    waterStateDoc["device"]["identifiers"][0] = HA_DEVICE_ID;
+    waterStateDoc["device"]["name"] = HA_DEVICE_NAME;
+    waterStateDoc["device"]["manufacturer"] = "DIY";
+    waterStateDoc["device"]["model"] = "ESP32 Relay Module";
+
+    String waterStatePayload;
+    serializeJson(waterStateDoc, waterStatePayload);
+    const String waterStateDiscoveryTopic = String(HA_DISCOVERY_PREFIX) +
+        "/sensor/" + String(HA_DEVICE_ID) + "_water_level/config";
+    mqttClient.publish(waterStateDiscoveryTopic.c_str(), waterStatePayload.c_str(), true);
+
+    JsonDocument waterPercentDoc;
+    waterPercentDoc["name"] = "Water Level Percentage";
+    waterPercentDoc["unique_id"] = String(HA_DEVICE_ID) + "_water_level_percentage";
+    waterPercentDoc["stat_t"] = WATER_LEVEL_PERCENT_TOPIC;
+    waterPercentDoc["avty_t"] = HA_AVAILABILITY_TOPIC;
+    waterPercentDoc["unit_of_meas"] = "%";
+    waterPercentDoc["state_class"] = "measurement";
+    waterPercentDoc["device"]["identifiers"][0] = HA_DEVICE_ID;
+    waterPercentDoc["device"]["name"] = HA_DEVICE_NAME;
+    waterPercentDoc["device"]["manufacturer"] = "DIY";
+    waterPercentDoc["device"]["model"] = "ESP32 Relay Module";
+
+    String waterPercentPayload;
+    serializeJson(waterPercentDoc, waterPercentPayload);
+    const String waterPercentDiscoveryTopic = String(HA_DISCOVERY_PREFIX) +
+        "/sensor/" + String(HA_DEVICE_ID) + "_water_level_percentage/config";
+    mqttClient.publish(waterPercentDiscoveryTopic.c_str(), waterPercentPayload.c_str(), true);
 }
 
 void mqttLoop()

@@ -2,6 +2,7 @@
 #include <Update.h>
 #include "relay_manager.h"
 #include "ac_monitor.h"
+#include "water_level.h"
 
 AsyncWebServer server(80);
 
@@ -95,6 +96,8 @@ String htmlPage()
 <head>
 
     <title>ESP32 Smart Controller</title>
+
+    <meta charset="UTF-8">
 
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
@@ -222,6 +225,8 @@ String htmlPage()
 
         .electricity-on { color: #00e676; }
         .electricity-off { color: #ff5252; }
+
+        .water-level { color: #40c4ff; }
 
         .relay-grid
         {
@@ -479,6 +484,15 @@ String htmlPage()
         </div>
 
 
+        <div class="status-card">
+
+            <div class="status-title">WATER LEVEL</div>
+
+            <div class="status-value water-level" id="water-level-status">CHECKING...</div>
+
+        </div>
+
+
 
         <div class="relay-grid" id="relays"></div>
 
@@ -615,6 +629,17 @@ function fetchElectricityStatus()
     });
 }
 
+function fetchWaterLevel()
+{
+    fetch('/api/water_level')
+    .then(r => r.json())
+    .then(data =>
+    {
+        document.getElementById('water-level-status').textContent =
+            `${data.level} - ${data.percentage}%`;
+    });
+}
+
 
 
 function toggleRelay(relay, state)
@@ -631,11 +656,13 @@ function toggleRelay(relay, state)
 
 setInterval(fetchStates, 1000);
 setInterval(fetchElectricityStatus, 1000);
+setInterval(fetchWaterLevel, 1000);
 
 window.onload = function()
 {
     fetchStates();
     fetchElectricityStatus();
+    fetchWaterLevel();
 };
 
 </script>
@@ -668,6 +695,16 @@ void webServerInit()
     server.on("/api/electricity_status", HTTP_GET, [](AsyncWebServerRequest *request) {
         String json = String("{\"electricity_on\":") +
             (isElectricityOn() ? "true" : "false") + "}";
+        request->send(200, "application/json", json);
+    });
+
+    server.on("/api/water_level", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String json = String("{\"level\":\"") + getWaterLevelState() +
+            "\",\"percentage\":" + String(getWaterLevelPercentage()) +
+            ",\"float1\":" + (getFloatState(1) ? "true" : "false") +
+            ",\"float2\":" + (getFloatState(2) ? "true" : "false") +
+            ",\"float3\":" + (getFloatState(3) ? "true" : "false") +
+            ",\"float4\":" + (getFloatState(4) ? "true" : "false") + "}";
         request->send(200, "application/json", json);
     });
 
@@ -704,22 +741,107 @@ void webServerInit()
     <html>
     <head>
         <title>ESP32 OTA Update</title>
+        <meta charset='UTF-8'>
         <meta name='viewport' content='width=device-width, initial-scale=1'>
         <style>
-            body { font-family: Arial; text-align: center; margin-top: 40px; background: #f4f4f4; }
-            .progress { width: 80%; background: #eee; border-radius: 8px; margin: 20px auto; height: 30px; }
-            .progress-bar { height: 100%; background: #27ae60; border-radius: 8px; width: 0%; color: #fff; line-height: 30px; font-weight: bold; transition: width 0.2s; }
-            #log { width: 80%; margin: 20px auto; background: #fff; border-radius: 8px; min-height: 60px; padding: 10px; text-align: left; font-size: 1em; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+            * { box-sizing: border-box; }
+            body {
+                min-height: 100vh;
+                margin: 0;
+                padding: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-family: Arial, sans-serif;
+                color: #fff;
+                background: linear-gradient(135deg, #0f172a 0%, #111827 50%, #1e293b 100%);
+            }
+            .update-card {
+                width: 100%;
+                max-width: 560px;
+                padding: 32px;
+                border: 1px solid rgba(255,255,255,.1);
+                border-radius: 24px;
+                background: rgba(255,255,255,.06);
+                box-shadow: 0 16px 50px rgba(0,0,0,.35);
+                text-align: center;
+            }
+            h2 { margin: 0 0 8px; font-size: 1.8rem; }
+            .description { margin: 0 0 26px; color: #94a3b8; line-height: 1.5; }
+            .file-box {
+                padding: 18px;
+                border: 1px dashed rgba(255,255,255,.25);
+                border-radius: 14px;
+                background: rgba(15,23,42,.55);
+            }
+            input[type=file] { width: 100%; color: #cbd5e1; }
+            input[type=file]::file-selector-button {
+                margin-right: 12px;
+                padding: 10px 14px;
+                border: 0;
+                border-radius: 9px;
+                color: #fff;
+                background: #334155;
+                cursor: pointer;
+            }
+            .update-btn, .back-btn {
+                display: block;
+                width: 100%;
+                margin-top: 18px;
+                padding: 14px;
+                border: 0;
+                border-radius: 12px;
+                color: #fff;
+                font-size: 1rem;
+                font-weight: bold;
+                text-decoration: none;
+                cursor: pointer;
+            }
+            .update-btn { background: linear-gradient(135deg, #2196f3, #21cbf3); }
+            .back-btn { background: rgba(255,255,255,.1); }
+            .progress {
+                height: 28px;
+                margin: 24px 0 16px;
+                overflow: hidden;
+                border-radius: 14px;
+                background: rgba(15,23,42,.8);
+            }
+            .progress-bar {
+                width: 0%;
+                height: 100%;
+                border-radius: 14px;
+                color: #fff;
+                background: linear-gradient(135deg, #00c853, #00e676);
+                font-size: .85rem;
+                font-weight: bold;
+                line-height: 28px;
+                transition: width .2s;
+            }
+            #log {
+                min-height: 72px;
+                padding: 14px;
+                border-radius: 12px;
+                color: #94a3b8;
+                background: rgba(15,23,42,.8);
+                text-align: left;
+                white-space: pre-wrap;
+            }
         </style>
     </head>
     <body>
-        <h2>ESP32 Firmware Update</h2>
-        <form id="otaForm">
-            <input type="file" id="file" name="update" required>
-            <input type="submit" value="Update">
-        </form>
-        <div class="progress"><div class="progress-bar" id="progressBar">0%</div></div>
-        <div id="log"></div>
+        <main class="update-card">
+            <h2>Firmware Update</h2>
+            <p class="description">Select a compiled ESP32 firmware file to update this controller.</p>
+            <form id="otaForm">
+                <div class="file-box">
+                    <input type="file" id="file" name="update" accept=".bin" required>
+                </div>
+                <input class="update-btn" type="submit" value="UPLOAD FIRMWARE">
+            </form>
+            <div class="progress"><div class="progress-bar" id="progressBar">0%</div></div>
+            <div id="log">Ready. Select a .bin firmware file.</div>
+            <a class="back-btn" href="/">BACK TO DASHBOARD</a>
+        </main>
         <script>
         const form = document.getElementById('otaForm');
         const progressBar = document.getElementById('progressBar');

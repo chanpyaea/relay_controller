@@ -31,6 +31,15 @@
 #define AC_ON_CONFIRM_CHECKS  3
 #define AC_OFF_CONFIRM_CHECKS 3
 #define AC_STATE_TOPIC        MQTT_BASE_TOPIC "/electricity/state"
+
+// WATER LEVEL FLOAT SWITCHES (active HIGH)
+#define FLOAT1 12
+#define FLOAT2 13
+#define FLOAT3 14
+#define FLOAT4 27
+#define WATER_LEVEL_CHECK_INTERVAL_MS 250
+#define WATER_LEVEL_STATE_TOPIC MQTT_BASE_TOPIC "/water_level/state"
+#define WATER_LEVEL_PERCENT_TOPIC MQTT_BASE_TOPIC "/water_level/percentage"
 // RELAY GPIO
 #define RELAY1_PIN 5
 #define RELAY2_PIN 18

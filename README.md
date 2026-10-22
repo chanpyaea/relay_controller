@@ -1,6 +1,6 @@
 # ESP32 Relay Controller 02
 
-ESP32 firmware for controlling three relays, monitoring the presence of AC electricity, providing a local web dashboard, supporting browser-based OTA updates, and integrating automatically with Home Assistant through MQTT Discovery.
+ESP32 firmware for controlling three relays, monitoring AC electricity and tank water level, providing a local web dashboard, supporting browser-based OTA updates, and integrating automatically with Home Assistant through MQTT Discovery.
 
 This project is configured as the **second controller** in the installation. Its Home Assistant device ID, MQTT client ID, discovery IDs, and MQTT topics are different from device 01, so the two devices do not overwrite each other.
 
@@ -10,11 +10,13 @@ This project is configured as the **second controller** in the installation. Its
 - Local responsive web dashboard
 - AC electricity ON/cut-off detection on GPIO 25
 - Noise filtering and three-second state confirmation
-- JSON HTTP APIs for relay and electricity states
+- Four active-HIGH float-switch inputs
+- Water-level states and percentage reporting (`LOW` 0%, `MIDDLE` 50%, `FULL` 100%)
+- JSON HTTP APIs for relay, electricity, and water-level states
 - MQTT relay control and retained state publication
 - Home Assistant MQTT Discovery
-- Separate Home Assistant electricity binary sensor
-- Browser-based OTA firmware updates
+- Separate Home Assistant electricity and water-level sensors
+- Browser-based OTA firmware updates with progress display and dashboard navigation
 - Automatic Wi-Fi and MQTT reconnection
 
 ## Hardware
@@ -25,6 +27,10 @@ This project is configured as the **second controller** in the installation. Its
 | Relay 2 | GPIO 18 | Output | Active HIGH |
 | Relay 3 | GPIO 19 | Output | Active HIGH |
 | AC detector `H_PF` | GPIO 25 | Input | Falling-edge pulse input with internal pull-up |
+| Float 1 | GPIO 12 | Input | Active HIGH; used for level calculation |
+| Float 2 | GPIO 13 | Input | Active HIGH; used for level calculation |
+| Float 3 | GPIO 14 | Input | Read by the API; reserved for future level logic |
+| Float 4 | GPIO 27 | Input | Read by the API; reserved for future level logic |
 
 The relay outputs initialize LOW/OFF when the ESP32 starts.
 
@@ -49,6 +55,21 @@ Consequently, Home Assistant and the web dashboard normally take about three sec
 #define AC_ON_CONFIRM_CHECKS     3
 #define AC_OFF_CONFIRM_CHECKS    3
 ```
+
+## Water-level detection
+
+The firmware reads all four float-switch inputs every 250 milliseconds. The switches must provide a safe 3.3 V-compatible HIGH or LOW signal; the inputs are configured as `INPUT`, so external pull-up or pull-down circuitry must prevent floating signals.
+
+The current tank-level calculation uses Float 1 and Float 2:
+
+| Float 1 (GPIO 12) | Float 2 (GPIO 13) | Water level | Percentage |
+| --- | --- | --- | ---: |
+| HIGH | HIGH | `FULL` | 100% |
+| LOW | HIGH | `MIDDLE` | 50% |
+| LOW | LOW | `LOW` | 0% |
+| HIGH | LOW | `LOW` | 0% |
+
+The Float 1 HIGH / Float 2 LOW combination is treated as `LOW` because it does not match a valid configured level. Float 3 and Float 4 are initialized and exposed in the HTTP API, but they do not currently affect the calculated level.
 
 ## Software requirements
 
@@ -110,6 +131,8 @@ The firmware automatically derives all of these values from the suffix:
 | MQTT base topic | `home/esp32_relay_03` |
 | Availability topic | `home/esp32_relay_03/availability` |
 | Electricity topic | `home/esp32_relay_03/electricity/state` |
+| Water-level state topic | `home/esp32_relay_03/water_level/state` |
+| Water-level percentage topic | `home/esp32_relay_03/water_level/percentage` |
 
 Every physical ESP32 must use a different suffix. Duplicate suffixes cause MQTT disconnections and Home Assistant entities overwriting each other. Build and flash each device separately after changing the suffix.
 
@@ -152,7 +175,7 @@ Open that address in a browser on the same network:
 http://192.168.x.x/
 ```
 
-The dashboard displays the electricity supply independently from the three relays. It also provides controls for every relay and a link to the OTA update page.
+The dashboard displays the electricity supply, water-level name and percentage, and three relay controls. It also provides a link to the OTA update page.
 
 ### Local HTTP API
 
@@ -160,6 +183,7 @@ The dashboard displays the electricity supply independently from the three relay
 | --- | --- | --- |
 | GET | `/api/relay_states` | Returns the three relay states as a JSON array |
 | GET | `/api/electricity_status` | Returns `{"electricity_on":true}` or `false` |
+| GET | `/api/water_level` | Returns level, percentage, and all four raw float states |
 | GET | `/api/relay/1/on` | Turns relay 1 on |
 | GET | `/api/relay/1/off` | Turns relay 1 off |
 | GET | `/api/relay/2/on` | Turns relay 2 on |
@@ -168,12 +192,20 @@ The dashboard displays the electricity supply independently from the three relay
 | GET | `/api/relay/3/off` | Turns relay 3 off |
 | GET | `/update` | Opens the browser OTA page |
 
+Example water-level response:
+
+```json
+{"level":"MIDDLE","percentage":50,"float1":false,"float2":true,"float3":false,"float4":false}
+```
+
 ## OTA firmware update
 
 1. Build the project and locate `.pio/build/esp32dev/firmware.bin`.
 2. Open `http://ESP32_IP/update`.
 3. Select `firmware.bin` and start the upload.
 4. Keep the ESP32 powered and connected until it reports success and reboots.
+
+Select **Back to Dashboard** to return to the controller home page without starting an update.
 
 Use USB recovery if an interrupted or incompatible OTA update prevents normal startup.
 
@@ -220,16 +252,20 @@ Published discovery: homeassistant/switch/esp32_relay_02_relay_1/config
 Published discovery: homeassistant/switch/esp32_relay_02_relay_2/config
 Published discovery: homeassistant/switch/esp32_relay_02_relay_3/config
 Published discovery: homeassistant/binary_sensor/esp32_relay_02_ac_power/config
+Published discovery: homeassistant/sensor/esp32_relay_02_water_level/config
+Published discovery: homeassistant/sensor/esp32_relay_02_water_level_percentage/config
 ```
 
-Open **Settings > Devices & services > MQTT > Devices**. The device should appear as **ESP32 Relay Controller 02** with four entities:
+Open **Settings > Devices & services > MQTT > Devices**. The device should appear as **ESP32 Relay Controller 02** with six entities:
 
 - Relay 1
 - Relay 2
 - Relay 3
 - Electricity Supply
+- Water Level
+- Water Level Percentage
 
-To display electricity on a dashboard, edit the dashboard, add a **Tile** or **Entities** card, and select **Electricity Supply**.
+To display these readings on a Home Assistant dashboard, add **Tile** or **Entities** cards and select **Electricity Supply**, **Water Level**, and **Water Level Percentage**.
 
 ## MQTT topics
 
@@ -245,8 +281,10 @@ All state messages are retained by the broker.
 | Relay 3 command | `home/esp32_relay_02/relay/3/set` | `ON` or `OFF` |
 | Relay 3 state | `home/esp32_relay_02/relay/3/state` | `ON` or `OFF` |
 | Electricity state | `home/esp32_relay_02/electricity/state` | `ON` or `OFF` |
+| Water-level state | `home/esp32_relay_02/water_level/state` | `LOW`, `MIDDLE`, or `FULL` |
+| Water-level percentage | `home/esp32_relay_02/water_level/percentage` | `0`, `50`, or `100` |
 
-Discovery configurations are published as retained messages below `homeassistant/switch/.../config` and `homeassistant/binary_sensor/.../config`.
+Discovery configurations are published as retained messages below `homeassistant/switch/.../config`, `homeassistant/binary_sensor/.../config`, and `homeassistant/sensor/.../config`.
 
 ## Troubleshooting
 
@@ -286,6 +324,14 @@ Flash the latest firmware and restart the ESP32. The latest version publishes a 
 - Check the broker logs for authentication failures.
 - Ensure every controller has a different `DEVICE_ID_SUFFIX`; duplicate suffixes produce duplicate MQTT client IDs.
 
+### Water level is incorrect or unstable
+
+- Confirm the float-switch signals are 3.3 V compatible and share the required ground/reference with the ESP32.
+- Confirm Float 1 is connected to GPIO 12 and Float 2 to GPIO 13.
+- Add suitable external pull-up or pull-down resistors; the firmware does not enable internal pulls for these inputs.
+- Open `/api/water_level` to inspect the raw `float1` through `float4` readings.
+- Confirm the switches produce HIGH when active. If the hardware is active LOW, the input logic must be inverted in the firmware.
+
 ### Dashboard does not open
 
 - Read the current ESP32 address from Serial Monitor.
@@ -300,6 +346,7 @@ include/
   config.h
   mqtt_manager.h
   relay_manager.h
+  water_level.h
   web_server.h
   wifi_manager.h
 src/
@@ -307,6 +354,7 @@ src/
   main.cpp
   mqtt_manager.cpp
   relay_manager.cpp
+  water_level.cpp
   web_server.cpp
   wifi_manager.cpp
 platformio.ini

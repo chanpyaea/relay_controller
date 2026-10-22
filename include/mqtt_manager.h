@@ -13,4 +13,6 @@ void mqttPublishDiscovery();
 
 void mqttPublishElectricityState(bool state);
 
+void mqttPublishWaterLevel(const char* state, uint8_t percentage);
+
 #endif
